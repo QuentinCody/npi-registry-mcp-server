@@ -23,6 +23,8 @@ export function registerCodeMode(
 
     const executeTool = createExecuteTool({
         prefix: "npi",
+        // Verifiable provenance: npi_execute results carry a _meta.citation.
+        source: { id: "npi", name: "NPPES NPI Registry", url: "https://npiregistry.cms.hhs.gov", license: "U.S. Public Domain" },
         catalog: npiCatalog,
         apiFetch,
         doNamespace: env.NPI_REGISTRY_DATA_DO,
