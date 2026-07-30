@@ -39,7 +39,7 @@ console.log(`${BLUE}NPI Registry Structured Content Regression Tests${RESET}`);
 // Check index.ts
 const indexContent = readFile('src/index.ts');
 assertContains('src/index.ts', indexContent, 'NpiRegistryDataDO', 'index.ts exports NpiRegistryDataDO');
-assertContains('src/index.ts', indexContent, 'McpAgent', 'index.ts uses McpAgent');
+assertContains('src/index.ts', indexContent, 'StatelessMcpWorker', 'index.ts uses StatelessMcpWorker');
 
 // Check do.ts
 const doContent = readFile('src/do.ts');
