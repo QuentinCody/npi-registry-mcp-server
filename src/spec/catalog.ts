@@ -5,9 +5,9 @@ export const npiCatalog: ApiCatalog = {
     baseUrl: "https://npiregistry.cms.hhs.gov/api",
     version: "2.1",
     auth: "none",
-    endpointCount: 5,
+    endpointCount: 7,
     notes:
-        "- All requests go to the root endpoint with version=2.1 query param\n" +
+        "- Registry requests go to the root endpoint with version=2.1 query param\n" +
         "- Maximum 200 results per request (use `limit` param), use `skip` for pagination (up to 1200 total)\n" +
         "- NPI-1 = individual providers (physicians, nurses, therapists, etc.)\n" +
         "- NPI-2 = organizations (hospitals, clinics, pharmacies, labs, etc.)\n" +
@@ -18,10 +18,16 @@ export const npiCatalog: ApiCatalog = {
         "- taxonomy_description supports wildcards: 'cardio*' matches Cardiology, Cardiovascular Disease, etc.\n" +
         "- State uses 2-letter abbreviation (e.g., 'CA', 'NY', 'TX')\n" +
         "- NPI is a 10-digit number with Luhn check digit\n" +
-        "- Use exact_match=true for precise name matching (default is partial/fuzzy)\n" +
+        "- use_first_name_alias=false requests exact first names for individuals/authorized officials without a wildcard. The native default includes aliases; this is not an exact organization-name filter. exact_match is unsupported.\n" +
         "- Empty result: { result_count: 0, results: [] }\n" +
-        "- The API has no authentication and is free to use",
+        "- The API has no authentication and is free to use\n" +
+        "- Bulk V2 is a file format, not Registry API 2.1. /bulk/releases discovers CMS download links; /bulk/join joins checksum-labelled offline subsets without fetching ZIPs. Weekly increments and deactivations remain separate from monthly snapshots. No snapshot reconstruction or credential validation is implied.",
+    workflows: [
+        {title: "Discover NPPES V2 monthly, weekly and deactivation releases", description: "Keep the current provider listing and its hash; download and SHA-256 pin the selected archive outside the Worker. Use scripts/extract_v2.py to scan exact members for selected NPIs and POST its packet to /bulk/join. Do not use weekly deltas as full snapshots.", keywords: ["bulk", "V2", "monthly", "weekly", "deactivation", "locations"], code: `return await api.get("/bulk/releases");`},
+    ],
     endpoints: [
+        {method: "GET", path: "/bulk/releases", summary: "Discover live CMS NPPES V2 archive links and their release kinds", category: "bulk", queryParams: [{name: "expected_listing_sha256", type: "string", required: false, description: "Optional listing drift check; not an archive checksum"}]},
+        {method: "POST", path: "/bulk/join", summary: "Join exact NPIs across checksum-labelled V2 provider, location, other-name, endpoint and deactivation subsets", category: "bulk", body: {contentType: "application/json", description: "Output of scripts/extract_v2.py: {format_version:'nppes-v2-extract-1', bulk_version:'2', npis:[...], files:[{kind,source_url,release_kind,release_label,archive_sha256,member,member_sha256,complete_scan:true,rows:[native string-valued CSV rows]}]}. Max 1 MiB, 100 NPIs, 20 files, 1000 rows. Caller-supplied hashes are not independently verified by this Worker."}, usageHint: "Preserves one-to-many reference rows and extended field lengths. Sources and dates remain separate. Empty subsets do not prove active status; deactivation/reactivation is not automatically reconciled. Combine separately extracted packets by concatenating files only when the requested NPIs match."},
         {
             method: "GET",
             path: "/providers/search",
@@ -92,10 +98,10 @@ export const npiCatalog: ApiCatalog = {
                     description: "Number of results to skip for pagination",
                 },
                 {
-                    name: "exact_match",
+                    name: "use_first_name_alias",
                     type: "boolean",
                     required: false,
-                    description: "If true, require exact name match instead of partial",
+                    description: "Include similar first names/aliases (default true); false requests exact first names when no wildcard is used. Applies to individuals and authorized officials, not organization names.",
                 },
                 {
                     name: "country_code",

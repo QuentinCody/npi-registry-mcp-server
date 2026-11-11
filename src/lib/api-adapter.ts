@@ -1,60 +1,45 @@
 import type { ApiFetchFn } from "@bio-mcp/shared/codemode/catalog";
+import {discoverBulk, fail, readText} from "./bulk";
+import {joinBulk} from "./bulk-join";
 import { nppesFetch } from "./http";
 
 export function createNpiApiFetch(): ApiFetchFn {
     return async (request) => {
-        // The NPPES API is a single endpoint at the root (/)
-        // All virtual catalog paths map to the same root with different query params.
-        // Strip any virtual path prefix — everything goes to /
-        let params = { ...request.params };
-
-        const path = request.path;
-
-        // /providers/lookup?number=... → /?number=...
-        if (path.startsWith("/providers/lookup")) {
-            // params already contains number, pass through
+        if (request.path === "/bulk/releases") {
+            if (request.method !== "GET" || request.body !== undefined) fail("Bulk release discovery requires GET without a body");
+            return {status: 200, data: await discoverBulk(request.params ?? {})};
         }
-        // /providers/organizations?organization_name=... → /?enumeration_type=NPI-2&organization_name=...
-        else if (path.startsWith("/providers/organizations")) {
-            params = { enumeration_type: "NPI-2", ...params };
+        if (request.path === "/bulk/join") {
+            if (request.method !== "POST" || Object.keys(request.params ?? {}).length) fail("Bulk join requires POST without query parameters");
+            return {status: 200, data: await joinBulk(request.body)};
         }
-        // /providers/by-specialty?taxonomy_description=... → /?taxonomy_description=...
-        else if (path.startsWith("/providers/by-specialty")) {
-            // params already contains taxonomy_description, pass through
+        const paths = ["/providers/search", "/providers/lookup", "/providers/organizations", "/providers/by-specialty", "/providers/by-location"];
+        if (request.method !== "GET" || request.body !== undefined || !paths.includes(request.path)) fail("Unknown NPI read operation");
+        const params = {...request.params};
+        if (params.exact_match !== undefined) fail("exact_match is not a documented NPPES parameter; use use_first_name_alias=false for exact first-name matching only");
+        if (params.use_first_name_alias !== undefined) {
+            if (typeof params.use_first_name_alias !== "boolean") fail("use_first_name_alias must be boolean");
+            params.use_first_name_alias = params.use_first_name_alias ? "True" : "False";
         }
-        // /providers/by-location?state=...&city=... → /?state=...&city=...
-        else if (path.startsWith("/providers/by-location")) {
-            // params already contains location filters, pass through
+        if (request.path === "/providers/organizations") params.enumeration_type = "NPI-2";
+        if (params.version !== undefined && params.version !== "2.1") fail("Registry API remains version 2.1; bulk V2 is separate");
+        for (const [key, fallback, maximum] of [["limit", 10, 200], ["skip", 0, 1000]] as const) {
+            const value = params[key] ?? fallback;
+            if (!/^\d+$/.test(String(value)) || Number(value) < (key === "limit" ? 1 : 0) || Number(value) > maximum) fail(`Invalid ${key}`);
+            params[key] = Number(value);
         }
-        // /providers/search or any other path — pass through all params
-        // Default: just forward params as-is
-
         // nppesFetch auto-appends version=2.1
         const response = await nppesFetch("/", params);
 
-        if (!response.ok) {
-            let errorBody: string;
-            try {
-                errorBody = await response.text();
-            } catch {
-                errorBody = response.statusText;
-            }
-            const error = new Error(`HTTP ${response.status}: ${errorBody.slice(0, 200)}`) as Error & {
-                status: number;
-                data: unknown;
-            };
-            error.status = response.status;
-            error.data = errorBody;
-            throw error;
-        }
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("json")) {
-            const text = await response.text();
-            return { status: response.status, data: text };
-        }
-
-        const data = await response.json();
-        return { status: response.status, data };
+        return await readNppesResponse(response);
     };
+}
+
+async function readNppesResponse(response: Response) {
+  const raw = await readText(response, 4 * 1024 * 1024);
+  let data: unknown;
+  try { data = JSON.parse(raw); } catch { fail("Invalid NPPES JSON", 502, {response: raw, http_status: response.status, incomplete: true}); }
+  if (!data || typeof data !== "object" || Array.isArray(data)) fail("Invalid NPPES response", 502, {response: raw, problem: data, http_status: response.status, incomplete: true});
+  if ("Errors" in data) fail("NPPES returned query errors; refine the request", response.status, {response: raw, problem: data, http_status: response.status, incomplete: true});
+  return {status: response.status, data};
 }

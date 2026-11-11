@@ -1,5 +1,5 @@
-import { restFetch } from "@bio-mcp/shared/http/rest-fetch";
 import type { RestFetchOptions } from "@bio-mcp/shared/http/rest-fetch";
+import { restFetch } from "@bio-mcp/shared/http/rest-fetch";
 
 const NPPES_BASE = "https://npiregistry.cms.hhs.gov/api";
 
@@ -23,7 +23,7 @@ export async function nppesFetch(
     };
 
     // Always include version=2.1
-    const mergedParams = { version: "2.1", ...params };
+    const mergedParams = { ...params, version: "2.1" };
 
     return restFetch(baseUrl, path, mergedParams, {
         ...opts,
